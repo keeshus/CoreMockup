@@ -7,7 +7,7 @@ const PROVIDERS = [
   { value: 'litellm', label: 'LiteLLM' },
 ];
 
-function MCPRow({ server, index, onChange, onRemove }) {
+function MCPRow({ server, index, onChange, onUpdate, onRemove }) {
   const transport = server.transport || 'stdio';
   return (
     <div style={{
@@ -52,7 +52,7 @@ function MCPRow({ server, index, onChange, onRemove }) {
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button
-          onClick={() => { onChange(index, 'transport', 'stdio'); onChange(index, 'url', undefined); }}
+          onClick={() => onUpdate(index, { transport: 'stdio', url: undefined, command: server.command || '', args: server.args || [] })}
           style={{
             flex: 1,
             padding: '6px 0',
@@ -69,7 +69,7 @@ function MCPRow({ server, index, onChange, onRemove }) {
           stdio
         </button>
         <button
-          onClick={() => { onChange(index, 'transport', 'sse'); onChange(index, 'command', undefined); onChange(index, 'args', []); }}
+          onClick={() => onUpdate(index, { transport: 'sse', url: server.url || '', command: undefined, args: [] })}
           style={{
             flex: 1,
             padding: '6px 0',
@@ -146,15 +146,27 @@ export default function SettingsPanel({ settings, onSave, mcpStatus }) {
   };
 
   const handleMcpChange = (index, key, value) => {
-    const servers = [...(local.mcpServers || [])];
-    servers[index] = { ...servers[index], [key]: value };
-    handleChange('mcpServers', servers);
+    setLocal(prev => {
+      const servers = [...(prev.mcpServers || [])];
+      servers[index] = { ...servers[index], [key]: value };
+      return { ...prev, mcpServers: servers };
+    });
+  };
+
+  const handleMcpUpdate = (index, updates) => {
+    setLocal(prev => {
+      const servers = [...(prev.mcpServers || [])];
+      servers[index] = { ...servers[index], ...updates };
+      return { ...prev, mcpServers: servers };
+    });
   };
 
   const handleMcpRemove = (index) => {
-    const servers = [...(local.mcpServers || [])];
-    servers.splice(index, 1);
-    handleChange('mcpServers', servers);
+    setLocal(prev => {
+      const servers = [...(prev.mcpServers || [])];
+      servers.splice(index, 1);
+      return { ...prev, mcpServers: servers };
+    });
   };
 
   const handleMcpAdd = () => {
@@ -305,7 +317,7 @@ export default function SettingsPanel({ settings, onSave, mcpStatus }) {
           </p>
 
           {(local.mcpServers || []).map((server, i) => (
-            <MCPRow key={i} server={server} index={i} onChange={handleMcpChange} onRemove={handleMcpRemove} />
+            <MCPRow key={i} server={server} index={i} onChange={handleMcpChange} onUpdate={handleMcpUpdate} onRemove={handleMcpRemove} />
           ))}
 
           <button
