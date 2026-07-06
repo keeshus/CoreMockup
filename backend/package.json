@@ -1,0 +1,23 @@
+{
+  "name": "core-mockup-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "db:generate": "drizzle-kit generate --config=./drizzle.config.js",
+    "db:migrate": "drizzle-kit migrate --config=./drizzle.config.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cors": "^2.8.6",
+    "drizzle-orm": "^0.43.1",
+    "express": "^5.2.1",
+    "openai": "^6.45.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.6"
+  }
+}

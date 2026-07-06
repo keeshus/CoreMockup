@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: core-mockup-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: core_mockup
+      POSTGRES_USER: core_mockup
+      POSTGRES_PASSWORD: core_mockup_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core_mockup"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    container_name: core-mockup-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3101:3101"
+    environment:
+      - PORT=3101
+      - DATABASE_URL=postgres://core_mockup:core_mockup_dev@postgres:5432/core_mockup
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  frontend:
+    container_name: core-mockup-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3102:3000"
+    environment:
+      - NEXT_TELEMETRY_DISABLED=1
+    restart: always
+
+volumes:
+  pgdata:

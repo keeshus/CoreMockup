@@ -1,0 +1,28 @@
+{
+  "name": "core-mockup",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "worker",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -n \"backend,frontend\" -c \"blue,magenta\" \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend": "npm run start -w backend",
+    "backend:dev": "nodemon --env-file=.env backend/index.js",
+    "backend:build": "npm run build -w backend",
+    "worker": "npm run start -w worker",
+    "worker:dev": "nodemon --env-file=.env worker/index.js",
+    "worker:build": "npm run build -w worker",
+    "frontend:dev": "npm run dev -w frontend",
+    "frontend:build": "npm run build -w frontend",
+    "frontend:start": "npm run start -w frontend -- -H 0.0.0.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "nodemon": "^3.1.14",
+    "wait-on": "^9.0.10"
+  },
+  "type": "module"
+}
