@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { runAgent, getBuiltinTools } from './agent.js';
 import { MCPManager } from './mcp.js';
-import { initDb, loadSettings, saveSettings } from './db/index.js';
+import { initDb, loadSettings, saveSettings, listSessions, getSession, createSession, updateSession, deleteSession } from './db/index.js';
 
 const app = express();
 const port = process.env.PORT || 3101;
@@ -134,6 +134,66 @@ app.get('/api/mcp/status', (req, res) => {
     tools: mcpManager.getToolDefs().map(t => ({ name: t.name, description: t.description })),
     builtinTools: getBuiltinTools().map(t => ({ name: t.name, description: t.description })),
   });
+});
+
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const list = await listSessions();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sessions/:id', async (req, res) => {
+  try {
+    const session = await getSession(parseInt(req.params.id));
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sessions', async (req, res) => {
+  try {
+    const { name, thread, html } = req.body;
+    const session = await createSession({ name, thread, html });
+    res.status(201).json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/sessions/:id', async (req, res) => {
+  try {
+    const { name, thread, html } = req.body;
+    const session = await updateSession(parseInt(req.params.id), { name, thread, html });
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/sessions/:id', async (req, res) => {
+  try {
+    await deleteSession(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reset', (req, res) => {
+  currentMockupHtml = '';
+  res.json({ ok: true, message: 'Mockup reset' });
+});
+
+app.put('/api/mockup', (req, res) => {
+  const { html } = req.body;
+  currentMockupHtml = html || '';
+  res.json({ ok: true });
 });
 
 app.get('/api/health', (req, res) => {

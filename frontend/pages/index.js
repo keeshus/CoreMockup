@@ -4,12 +4,13 @@ import MockupPreview from '../components/MockupPreview';
 import PromptInput from '../components/PromptInput';
 import SettingsPanel from '../components/SettingsPanel';
 import ChatView from '../components/ChatView';
+import SessionsList from '../components/SessionsList';
 
 export default function Home() {
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState({ provider: 'mock', mcpServers: [] });
-  const [showSettings, setShowSettings] = useState(false);
+  const [panelMode, setPanelMode] = useState('sessions');
   const [error, setError] = useState('');
   const [thread, setThread] = useState([]);
   const [streaming, setStreaming] = useState(false);
@@ -20,6 +21,8 @@ export default function Home() {
   const [streamingStatus, setStreamingStatus] = useState('');
   const abortRef = useRef(null);
   const [mcpStatus, setMcpStatus] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const currentSessionIdRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/settings')
@@ -36,6 +39,17 @@ export default function Home() {
     return () => {
       if (abortRef.current) abortRef.current.abort();
     };
+  }, []);
+
+  const autoSaveSession = useCallback(async (sid, data) => {
+    if (!sid) return;
+    try {
+      await fetch(`/api/sessions/${sid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch {}
   }, []);
 
   const handleSend = useCallback(async (prompt) => {
@@ -149,6 +163,7 @@ export default function Home() {
                 if (event.html) {
                   finalHtml = event.html;
                   setHtml(event.html);
+                  autoSaveSession(currentSessionIdRef.current, { html: event.html });
                 }
                 break;
 
@@ -169,13 +184,17 @@ export default function Home() {
 
       if (finalHtml) setHtml(finalHtml);
 
-      setThread(prev => [...prev, {
+      const assistantMsg = {
         role: 'assistant',
         text: assistantText,
         toolCalls: currentToolCalls,
         reasoning: reasoningText,
         code: codeText,
-      }]);
+      };
+      setThread(prev => [...prev, assistantMsg]);
+
+      const fullThread = [...thread, userMsg, assistantMsg];
+      autoSaveSession(currentSessionIdRef.current, { thread: fullThread, html: finalHtml || html });
     } catch (err) {
       if (err.name !== 'AbortError') {
         setError(err.message);
@@ -189,7 +208,7 @@ export default function Home() {
       setStreamingCode('');
       abortRef.current = null;
     }
-  }, [thread, loading]);
+  }, [thread, loading, html, autoSaveSession]);
 
   const handleSaveSettings = useCallback(async (newSettings) => {
     const res = await fetch('/api/settings', {
@@ -203,17 +222,93 @@ export default function Home() {
     setMcpStatus(mcpCount > 0 ? `${mcpCount}` : '0');
   }, []);
 
+  const handleLoadSession = useCallback((session) => {
+    setThread(session.thread || []);
+    setHtml(session.html || '');
+    setCurrentSessionId(session.id);
+    currentSessionIdRef.current = session.id;
+    setPanelMode('chat');
+  }, []);
+
+  const handleNewSession = useCallback(async (name) => {
+    await fetch('/api/reset', { method: 'POST' }).catch(() => {});
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name || 'Untitled',
+          thread: [],
+          html: '',
+        }),
+      });
+      const session = await res.json();
+      setCurrentSessionId(session.id);
+      currentSessionIdRef.current = session.id;
+    } catch {}
+    setThread([]);
+    setHtml('');
+    setError('');
+    setPanelMode('chat');
+  }, []);
+
+  const handleFork = useCallback(async (name, html, msgIndex) => {
+    const forkedThread = thread.slice(0, msgIndex + 1);
+    await fetch('/api/reset', { method: 'POST' }).catch(() => {});
+    await fetch('/api/mockup', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: html || '' }),
+    }).catch(() => {});
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, thread: forkedThread, html: html || '' }),
+      });
+      const session = await res.json();
+      setThread(forkedThread);
+      setHtml(html || '');
+      setCurrentSessionId(session.id);
+      currentSessionIdRef.current = session.id;
+    } catch {}
+  }, [thread]);
+
+  const handleReset = useCallback(async () => {
+    await fetch('/api/reset', { method: 'POST' }).catch(() => {});
+    setThread([]);
+    setHtml('');
+    setError('');
+    setCurrentSessionId(null);
+    currentSessionIdRef.current = null;
+    setPanelMode('sessions');
+  }, []);
+
+  const panelTitle = panelMode === 'sessions' ? 'Sessions' : panelMode === 'settings' ? 'Settings' : 'Agent Chat';
+
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <MockupPreview html={html} />
       </div>
 
-      <FloatingPanel title={showSettings ? 'Settings' : 'Agent Chat'} showSettings={showSettings} onToggleSettings={() => setShowSettings(s => !s)}>
-        {showSettings ? (
+      <FloatingPanel
+        title={panelTitle}
+        showSettings={panelMode === 'settings'}
+        onToggleSettings={() => setPanelMode(m => m === 'settings' ? (currentSessionId ? 'chat' : 'sessions') : 'settings')}
+        onToggleSessions={() => setPanelMode('sessions')}
+      >
+        {panelMode === 'settings' ? (
           <SettingsPanel settings={settings} onSave={handleSaveSettings} mcpStatus={mcpStatus} />
+        ) : panelMode === 'sessions' ? (
+          <SessionsList onLoadSession={handleLoadSession} onNew={handleNewSession} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+            {currentSessionId && (
+              <div style={{ fontSize: '0.75rem', color: '#7c7981', flexShrink: 0 }}>
+                Session #{currentSessionId}
+              </div>
+            )}
             <ChatView
               thread={thread}
               streaming={streaming}
@@ -222,6 +317,7 @@ export default function Home() {
               streamingReasoning={streamingReasoning}
               streamingStatus={streamingStatus}
               streamingCode={streamingCode}
+              onFork={handleFork}
             />
 
             {error && (

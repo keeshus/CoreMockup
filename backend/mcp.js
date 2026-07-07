@@ -7,10 +7,7 @@ export class MCPManager {
   async connectAll(servers = []) {
     await this.disconnectAll();
     for (const server of servers) {
-      if (!server.name) continue;
-      const transportType = server.transport || 'stdio';
-      if (transportType === 'sse' && !server.url) continue;
-      if (transportType === 'stdio' && !server.command) continue;
+      if (!server.name || !server.url) continue;
       try {
         await this.connect(server);
       } catch (err) {
@@ -21,20 +18,9 @@ export class MCPManager {
 
   async connect(serverConfig) {
     const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const transportType = serverConfig.transport || 'stdio';
-    let transport;
-
-    if (transportType === 'sse') {
-      const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-      transport = new SSEClientTransport(new URL(serverConfig.url));
-    } else {
-      const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
-      transport = new StdioClientTransport({
-        command: serverConfig.command,
-        args: serverConfig.args || [],
-        env: serverConfig.env || {},
-      });
-    }
+    const transportType = serverConfig.transport || 'sse';
+    const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
+    const transport = new SSEClientTransport(new URL(serverConfig.url));
 
     const client = new Client({ name: 'core-mockup', version: '1.0.0' });
     await client.connect(transport);
@@ -74,7 +60,12 @@ export class MCPManager {
       name: toolName,
       arguments: args,
     });
-    return result.content || result;
+    const raw = result.content ?? result;
+    if (typeof raw === 'string') return raw;
+    if (Array.isArray(raw)) {
+      return raw.map(c => c.text || JSON.stringify(c)).filter(Boolean).join('\n');
+    }
+    return JSON.stringify(raw);
   }
 
   getToolDefs() {

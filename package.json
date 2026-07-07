@@ -17,11 +17,14 @@
     "worker:build": "npm run build -w worker",
     "frontend:dev": "npm run dev -w frontend",
     "frontend:build": "npm run build -w frontend",
-    "frontend:start": "npm run start -w frontend -- -H 0.0.0.0"
+    "frontend:start": "npm run start -w frontend -- -H 0.0.0.0",
+    "test": "playwright test --config=tests/playwright.config.js"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "concurrently": "^10.0.3",
     "nodemon": "^3.1.14",
+    "playwright": "^1.61.1",
     "wait-on": "^9.0.10"
   },
   "type": "module"

@@ -1,12 +1,27 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-function ToolCallBlock({ tool, args, result, autoExpand }) {
+function ToolCallBlock({ tool, args, result, autoExpand, onFork }) {
   const [expanded, setExpanded] = useState(autoExpand || false);
+  const [forking, setForking] = useState(false);
+  const [forkName, setForkName] = useState('');
+  const forkInputRef = useRef(null);
+
+  useEffect(() => {
+    if (forking && forkInputRef.current) forkInputRef.current.focus();
+  }, [forking]);
+
+  const handleFork = () => {
+    const trimmed = forkName.trim();
+    if (!trimmed || !onFork) return;
+    onFork(trimmed);
+    setForkName('');
+    setForking(false);
+  };
 
   return (
-    <div style={{
+    <div data-testid={`tool-call-${tool}`} style={{
       borderRadius: 10,
       background: '#f7f2fb',
       border: '1px solid #e6e1ea',
@@ -14,7 +29,12 @@ function ToolCallBlock({ tool, args, result, autoExpand }) {
       fontSize: '0.78rem',
     }}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`${tool} tool call`}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -79,6 +99,86 @@ function ToolCallBlock({ tool, args, result, autoExpand }) {
                 {(typeof result === 'string' ? result : JSON.stringify(result)).length > 500 && '...'}
               </div>
             </div>
+          )}
+        </div>
+      )}
+      {tool === 'write_mockup' && onFork && (
+        <div style={{ borderTop: '1px solid #e6e1ea', padding: '6px 12px' }}>
+          {forking ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                ref={forkInputRef}
+                placeholder="Fork session name..."
+                value={forkName}
+                onChange={(e) => setForkName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleFork(); if (e.key === 'Escape') { setForking(false); setForkName(''); } }}
+                style={{
+                  flex: 1,
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  border: '1.5px solid #e6e1ea',
+                  fontSize: '0.75rem',
+                  fontFamily: 'inherit',
+                  outline: 'none',
+                  color: '#333138',
+                  background: '#ffffff',
+                }}
+              />
+              <button
+                data-testid="fork-confirm"
+                onClick={handleFork}
+                disabled={!forkName.trim()}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: forkName.trim() ? '#6c5ce7' : '#e6e1ea',
+                  color: forkName.trim() ? '#fcf7ff' : '#b4b0b9',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: forkName.trim() ? 'pointer' : 'default',
+                }}
+              >
+                Fork
+              </button>
+              <button
+                onClick={() => { setForking(false); setForkName(''); }}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  border: '1px solid #e6e1ea',
+                  background: 'transparent',
+                  color: '#605e66',
+                  fontSize: '0.72rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              data-testid="fork-btn"
+              onClick={(e) => { e.stopPropagation(); setForking(true); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                borderRadius: 6,
+                border: '1px solid #e0d4f5',
+                background: '#f0ebf8',
+                color: '#5948d3',
+                fontSize: '0.72rem',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Fork
+            </button>
           )}
         </div>
       )}
@@ -149,7 +249,56 @@ function MarkdownContent({ text, role }) {
   );
 }
 
-function Message({ msg }) {
+function CodeBlock({ code, streaming }) {
+  const preRef = useRef(null);
+
+  useEffect(() => {
+    if (streaming && preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight;
+    }
+  }, [code, streaming]);
+
+  return (
+    <div style={{
+      marginBottom: 6,
+      borderRadius: 10,
+      border: '1px solid #e6e1ea',
+      overflow: 'hidden',
+      fontSize: '0.75rem',
+    }}>
+      <div style={{
+        padding: '6px 12px',
+        background: '#f1ecf5',
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        color: '#605e66',
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+      }}>
+        Generated Code
+      </div>
+      <pre
+        ref={preRef}
+        data-testid="code-block"
+        style={{
+          margin: 0,
+          padding: 12,
+          background: '#1e1e2e',
+          color: '#cdd6f4',
+          overflow: 'auto',
+          maxHeight: 300,
+          lineHeight: 1.5,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+        }}
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function Message({ msg, onFork }) {
   const isUser = msg.role === 'user';
   return (
     <div style={{
@@ -165,38 +314,7 @@ function Message({ msg }) {
       borderBottomLeftRadius: isUser ? 12 : 0,
     }}>
       {msg.reasoning && <ReasoningBlock text={msg.reasoning} />}
-      {msg.code && (
-        <div style={{
-          marginBottom: 6,
-          borderRadius: 10,
-          border: '1px solid #e6e1ea',
-          overflow: 'hidden',
-          fontSize: '0.75rem',
-        }}>
-          <div style={{
-            padding: '6px 12px',
-            background: '#f1ecf5',
-            fontSize: '0.7rem',
-            fontWeight: 600,
-            color: '#605e66',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}>
-            Generated Code
-          </div>
-          <pre style={{
-            margin: 0,
-            padding: 12,
-            background: '#1e1e2e',
-            color: '#cdd6f4',
-            overflow: 'auto',
-            maxHeight: 300,
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}><code>{msg.code}</code></pre>
-        </div>
-      )}
+      {msg.code && <CodeBlock code={msg.code} />}
       {!isUser && msg.text && (
         <div style={{
           padding: '10px 14px',
@@ -211,7 +329,7 @@ function Message({ msg }) {
       {isUser && msg.text && <MarkdownContent text={msg.text} role={msg.role} />}
       {msg.toolCalls?.map((tc, i) => (
         <div key={i} style={{ marginTop: 6 }}>
-          <ToolCallBlock tool={tc.tool} args={tc.args} result={tc.result} />
+          <ToolCallBlock tool={tc.tool} args={tc.args} result={tc.result} onFork={tc.tool === 'write_mockup' ? (name) => onFork?.(name, tc.args?.html) : undefined} />
         </div>
       ))}
     </div>
@@ -230,7 +348,12 @@ function ReasoningBlock({ text, autoExpand }) {
       marginBottom: 8,
     }}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label="Reasoning"
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -290,42 +413,8 @@ function StreamingMessage({ text, toolCalls, reasoning, status, code }) {
         </div>
       ))}
 
-      {/* Live code being generated */}
-      {code && (
-        <div style={{
-          marginTop: 6,
-          marginBottom: 6,
-          borderRadius: 10,
-          border: '1px solid #e6e1ea',
-          overflow: 'hidden',
-          fontSize: '0.75rem',
-        }}>
-          <div style={{
-            padding: '6px 12px',
-            background: '#f1ecf5',
-            fontSize: '0.7rem',
-            fontWeight: 600,
-            color: '#605e66',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}>
-            Generated Code
-          </div>
-          <pre style={{
-            margin: 0,
-            padding: 12,
-            background: '#1e1e2e',
-            color: '#cdd6f4',
-            overflow: 'auto',
-            maxHeight: 300,
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}><code>{code}</code></pre>
-        </div>
-      )}
+      {code && <CodeBlock code={code} streaming />}
 
-      {/* Status / thinking indicator */}
       {!hasText && !hasToolCalls && !hasReasoning && (
         <div style={{
           padding: '10px 14px',
@@ -366,15 +455,15 @@ function StreamingMessage({ text, toolCalls, reasoning, status, code }) {
   );
 }
 
-export default function ChatView({ thread, streaming, streamingText, streamingToolCalls, streamingReasoning, streamingStatus, streamingCode }) {
+export default function ChatView({ thread, streaming, streamingText, streamingToolCalls, streamingReasoning, streamingStatus, streamingCode, onFork }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [thread, streamingText, streamingToolCalls]);
+  }, [thread, streamingText, streamingToolCalls, streamingCode]);
 
   return (
-    <div style={{
+    <div data-testid="chat-view" style={{
       flex: 1,
       overflowY: 'auto',
       display: 'flex',
@@ -404,7 +493,7 @@ export default function ChatView({ thread, streaming, streamingText, streamingTo
       )}
 
       {thread.map((msg, i) => (
-        <Message key={i} msg={msg} />
+        <Message key={i} msg={msg} onFork={(name, html) => onFork?.(name, html, i)} />
       ))}
 
       {streaming && (

@@ -64,9 +64,8 @@ export default function PromptInput({ onSend, loading }) {
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            width: 40,
-            height: 40,
+            gap: 6,
+            padding: '10px 16px',
             borderRadius: 12,
             border: 'none',
             background: value.trim() && !loading ? '#6c5ce7' : '#e6e1ea',
@@ -74,11 +73,14 @@ export default function PromptInput({ onSend, loading }) {
             cursor: value.trim() && !loading ? 'pointer' : 'default',
             transition: 'all 0.15s',
             flexShrink: 0,
+            fontSize: '0.85rem',
+            fontWeight: 600,
           }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M22 2L11 13" /><path d="M22 2L15 22l-4-9-9-4 20-7z" />
           </svg>
+          <span>Send</span>
         </button>
       </div>
       <div style={{ fontSize: '0.75rem', color: '#7c7981', textAlign: 'right' }}>

@@ -56,6 +56,45 @@ export async function saveSettings(data) {
   return merged;
 }
 
+export async function listSessions() {
+  const result = await db.select({
+    id: schema.sessions.id,
+    name: schema.sessions.name,
+    updatedAt: schema.sessions.updatedAt,
+  })
+    .from(schema.sessions)
+    .orderBy(schema.sessions.updatedAt);
+  return result;
+}
+
+export async function getSession(id) {
+  const result = await db.select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, id));
+  return result[0] || null;
+}
+
+export async function createSession({ name, thread, html }) {
+  const result = await db.insert(schema.sessions).values({
+    name: name || 'Untitled',
+    thread: thread || [],
+    html: html || '',
+  }).returning();
+  return result[0];
+}
+
+export async function updateSession(id, data) {
+  const result = await db.update(schema.sessions)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(schema.sessions.id, id))
+    .returning();
+  return result[0] || null;
+}
+
+export async function deleteSession(id) {
+  await db.delete(schema.sessions).where(eq(schema.sessions.id, id));
+}
+
 function getDefaultSettings() {
   return {
     provider: process.env.LLM_PROVIDER || 'mock',

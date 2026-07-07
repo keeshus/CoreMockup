@@ -8,7 +8,6 @@ const PROVIDERS = [
 ];
 
 function MCPRow({ server, index, onChange, onUpdate, onRemove }) {
-  const transport = server.transport || 'stdio';
   return (
     <div style={{
       padding: 12,
@@ -31,8 +30,7 @@ function MCPRow({ server, index, onChange, onUpdate, onRemove }) {
         <button
           onClick={() => onRemove(index)}
           style={{
-            width: 36,
-            height: 36,
+            padding: '6px 10px',
             borderRadius: 8,
             border: '1px solid #ffcdcd',
             background: '#fff0f0',
@@ -40,75 +38,24 @@ function MCPRow({ server, index, onChange, onUpdate, onRemove }) {
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
+            gap: 4,
             flexShrink: 0,
+            fontSize: '0.75rem',
           }}
           title="Remove server"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
           </svg>
+          <span>Remove</span>
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button
-          onClick={() => onUpdate(index, { transport: 'stdio', url: undefined, command: server.command || '', args: server.args || [] })}
-          style={{
-            flex: 1,
-            padding: '6px 0',
-            borderRadius: 8,
-            border: 'none',
-            background: transport === 'stdio' ? '#6c5ce7' : '#e6e1ea',
-            color: transport === 'stdio' ? '#fcf7ff' : '#605e66',
-            fontSize: '0.72rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-          }}
-        >
-          stdio
-        </button>
-        <button
-          onClick={() => onUpdate(index, { transport: 'sse', url: server.url || '', command: undefined, args: [] })}
-          style={{
-            flex: 1,
-            padding: '6px 0',
-            borderRadius: 8,
-            border: 'none',
-            background: transport === 'sse' ? '#6c5ce7' : '#e6e1ea',
-            color: transport === 'sse' ? '#fcf7ff' : '#605e66',
-            fontSize: '0.72rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-          }}
-        >
-          SSE (HTTP)
-        </button>
-      </div>
-      {transport === 'stdio' ? (
-        <>
-          <input
-            placeholder="Command (e.g. node, npx, python)"
-            value={server.command || ''}
-            onChange={(e) => onChange(index, 'command', e.target.value)}
-            style={inputStyle}
-          />
-          <input
-            placeholder="Args (comma-separated, e.g. server/index.js,--watch)"
-            value={(server.args || []).join(',')}
-            onChange={(e) => onChange(index, 'args', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-            style={inputStyle}
-          />
-        </>
-      ) : (
-        <input
-          placeholder="URL (e.g. http://localhost:8080/sse)"
-          value={server.url || ''}
-          onChange={(e) => onChange(index, 'url', e.target.value)}
-          style={inputStyle}
-        />
-      )}
+      <input
+        placeholder="URL (e.g. http://localhost:3098/sse)"
+        value={server.url || ''}
+        onChange={(e) => onChange(index, 'url', e.target.value)}
+        style={inputStyle}
+      />
     </div>
   );
 }
@@ -170,7 +117,7 @@ export default function SettingsPanel({ settings, onSave, mcpStatus }) {
   };
 
   const handleMcpAdd = () => {
-    const servers = [...(local.mcpServers || []), { name: '', transport: 'stdio', command: '', args: [] }];
+    const servers = [...(local.mcpServers || []), { name: '', transport: 'sse', url: '' }];
     handleChange('mcpServers', servers);
   };
 
@@ -234,6 +181,7 @@ export default function SettingsPanel({ settings, onSave, mcpStatus }) {
           <div>
             <label style={labelStyle}>Provider</label>
             <select
+              data-testid="provider-select"
               value={local.provider || 'mock'}
               onChange={(e) => handleChange('provider', e.target.value)}
               style={st()}
@@ -260,7 +208,7 @@ export default function SettingsPanel({ settings, onSave, mcpStatus }) {
               </div>
               <div>
                 <label style={labelStyle}>Reasoning Effort</label>
-                <select value={local.reasoningEffort || 'medium'} onChange={(e) => handleChange('reasoningEffort', e.target.value)} style={st()}>
+                <select data-testid="reasoning-select" value={local.reasoningEffort || 'medium'} onChange={(e) => handleChange('reasoningEffort', e.target.value)} style={st()}>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
