@@ -21,7 +21,7 @@
     "test": "playwright test --config=tests/playwright.config.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0",
+    "@playwright/test": "^1.62.1",
     "concurrently": "^10.0.4",
     "nodemon": "^3.1.14",
     "playwright": "^1.62.0",
