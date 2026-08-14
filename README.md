@@ -22,8 +22,16 @@ A chat panel on the left lets you talk to an LLM agent. The rest of the screen i
 |------|-------------|
 | `read_mockup` | Returns the current HTML with line numbers |
 | `search_code` | Finds matching lines with surrounding context |
-| `edit_mockup` | Replaces lines by number (small, precise changes) |
-| `write_mockup` | Replaces the entire HTML (full rewrites) |
+| `edit_mockup` | Replaces lines by number (preferred for localized changes) |
+| `write_mockup` | Replaces the entire HTML (only for complete redesigns) |
+| `undo_mockup` | Restores the previous version after a bad change |
+| `fetch_url` | Fetches a web page's content as a reference (e.g. "make it look like example.com") |
+| `inspect_page` | Analyzes how a web page looks: colors, fonts, layout structure, components |
+| `list_images` | Lists a page's images (logos, heroes, icons) with URLs |
+| `grab_image` | Fetches an image and returns it as a data URI to embed in the mockup |
+| `validate_html` | Checks the HTML for parse errors, duplicate ids, missing title |
+| `mock_data` | Generates realistic placeholder data (users, products, chart series, paragraphs, avatars) |
+| `check_console` | Returns JS errors/warnings captured from the live preview |
 | `respond` | Ends the turn with a structured message |
 
 The agent loops freely — it can call tools, reason, and generate text until it calls `respond`. You see everything stream in: text, reasoning, tool calls, and even the code being generated.

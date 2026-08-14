@@ -13,6 +13,8 @@ yarn-debug.log*
 yarn-error.log*
 .idea
 .vscode
+.playwright-mcp/
+test-results/
 example-transaction-files/
 error
 ponto-key

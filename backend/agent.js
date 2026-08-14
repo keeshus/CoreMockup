@@ -1,3 +1,9 @@
+import { createMockupStore } from './mockup-store.js';
+import { validateHtml } from './validate.js';
+import { generateMockData } from './mockdata.js';
+import { inspectPage } from './inspect.js';
+import { listImages, grabImage } from './images.js';
+
 const BUILTIN_TOOLS = [
   {
     name: 'read_mockup',
@@ -17,7 +23,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'edit_mockup',
-    description: 'Replace one or more lines in the mockup by line number. Use this for small, precise changes without rewriting the entire file. Use read_mockup first to see line numbers.',
+    description: 'Replace one or more lines in the mockup by line number. This is the PREFERRED tool for most changes: use it whenever the change affects roughly half of the file or less. Use read_mockup first to see line numbers.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -31,7 +37,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'write_mockup',
-    description: 'Replace the entire mockup with new HTML code. Use for full rewrites or when edit_mockup cannot make the needed changes. Always provide the COMPLETE file.',
+    description: 'Replace the ENTIRE mockup with new HTML code. Use ONLY for complete redesigns that affect most of the file. For any localized change, use edit_mockup instead. Always provide the COMPLETE file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,6 +46,77 @@ const BUILTIN_TOOLS = [
       },
       required: ['html'],
     },
+  },
+  {
+    name: 'undo_mockup',
+    description: 'Restore the mockup to the version before the most recent edit_mockup or write_mockup call. Use this when a change made things worse and you want to backtrack.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'fetch_url',
+    description: 'Fetch a web page and return its readable text content (title, headings, paragraphs, links). Use this when the user asks you to create a mockup "like" an existing site or page so you can replicate its structure, layout, and content.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL to fetch (http or https only)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'inspect_page',
+    description: 'Analyze how a web page LOOKS: its color palette, fonts, sizes, border radius, shadows, breakpoints, layout structure, and components. Use this when the user wants a mockup that visually resembles a site (e.g. "make it look like example.com"). Combine with fetch_url to also get the page content.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL to inspect (http or https only)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'list_images',
+    description: 'List the images used on a web page (logos, hero images, icons, photos) with their URLs, classified by role. Use this when building a mockup that reuses a site\'s actual images, e.g. its logo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The page URL whose images to list (http or https only)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'grab_image',
+    description: 'Fetch an image and return it as a base64 data URI that you can paste directly into the mockup as <img src="...">. Use this to embed logos and other images from a reference site. Images above ~300 KB are rejected; pick smaller ones. The data URI keeps the mockup self-contained (preview and screenshot work without the remote site).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The image URL to embed (http or https only)' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'validate_html',
+    description: 'Check the current mockup for HTML errors: unclosed tags, duplicate ids, missing title, empty body. Call this before finishing a turn to catch problems the user would see in the preview.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'mock_data',
+    description: 'Generate realistic placeholder data to fill mockups: users, products, chart series, paragraphs, or avatar images (as data URIs you can put directly in an <img> tag). Use this so mockups look real instead of showing lorem ipsum everywhere.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dataset: { type: 'string', enum: ['users', 'products', 'chart_series', 'paragraphs', 'avatars'], description: 'Which dataset to generate' },
+        count: { type: 'number', description: 'How many items to generate (default 5, max 20)' },
+      },
+      required: ['dataset'],
+    },
+  },
+  {
+    name: 'check_console',
+    description: 'Return JavaScript errors and warnings captured from the live preview of the mockup. Use this when the mockup contains scripts or the preview appears broken.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
   },
   {
     name: 'respond',
@@ -202,14 +279,15 @@ async function callAnthropic(messages, tools, settings, onStream) {
   return result;
 }
 
-export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools, mcpClient, onEvent }) {
+export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consoleLog, settings, mcpTools, mcpClient, onEvent }) {
   const events = [];
   const emit = (event) => { events.push(event); if (onEvent) onEvent(event); };
 
   emit({ type: 'status', text: 'Starting...' });
 
   const tools = getAllTools(mcpTools || []);
-  let currentMockupHtml = mockupHtml || '';
+  const store = mockupStore || createMockupStore(mockupHtml || '');
+  const getHtml = () => store.get();
   const messages = [];
   if (settings.systemPrompt) messages.push({ role: 'system', content: settings.systemPrompt });
   if (thread?.length > 0) { for (const msg of thread) messages.push({ role: msg.role, content: msg.content || '' }); }
@@ -232,7 +310,7 @@ export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools,
   } catch (err) {
     console.error('[Agent] Error:', err.message);
     emit({ type: 'error', error: err.message });
-    return { events, finalHtml: currentMockupHtml, error: err.message };
+    return { events, finalHtml: getHtml(), error: err.message };
   }
 
   for (let round = 0; ; round++) {
@@ -242,15 +320,15 @@ export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools,
 
     if (respondCall) {
       emit({ type: 'text', text: respondCall.arguments.message || '' });
-      emit({ type: 'done', finalHtml: currentMockupHtml });
-      return { events, finalHtml: currentMockupHtml };
+      emit({ type: 'done', finalHtml: getHtml() });
+      return { events, finalHtml: getHtml() };
     }
 
     if (otherCalls.length === 0) {
       const text = extractText(response, provider);
       if (text) emit({ type: 'text', text });
-      emit({ type: 'done', finalHtml: currentMockupHtml });
-      return { events, finalHtml: currentMockupHtml };
+      emit({ type: 'done', finalHtml: getHtml() });
+      return { events, finalHtml: getHtml() };
     }
 
     const text = extractText(response, provider);
@@ -268,17 +346,17 @@ export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools,
       let result;
       try {
         if (tc.name === 'read_mockup') {
-          if (!currentMockupHtml) result = 'No mockup exists yet. Use write_mockup to create one.';
+          if (!getHtml()) result = 'No mockup exists yet. Use write_mockup to create one.';
           else {
-            const lines = currentMockupHtml.split('\n');
-            result = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
+            const lines = getHtml().split('\n');
+            result = lines.map((l, i) => `${i + 1}: ${l}`).join('\n') + `\n\n(FILE: ${lines.length} lines)`;
           }
         } else if (tc.name === 'search_code') {
           const q = (tc.arguments.query || '').toLowerCase();
           if (!q) result = 'Please provide a search query.';
-          else if (!currentMockupHtml) result = 'No mockup to search.';
+          else if (!getHtml()) result = 'No mockup to search.';
           else {
-            const lines = currentMockupHtml.split('\n');
+            const lines = getHtml().split('\n');
             const matches = [];
             for (let i = 0; i < lines.length; i++) {
               if (lines[i].toLowerCase().includes(q)) {
@@ -291,22 +369,48 @@ export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools,
             result = matches.length > 0 ? matches.join('\n---\n') : `No matches found for "${tc.arguments.query}".`;
           }
         } else if (tc.name === 'edit_mockup') {
-          if (!currentMockupHtml) throw new Error('No mockup exists yet.');
+          if (!getHtml()) throw new Error('No mockup exists yet.');
           const { start_line, end_line, new_content } = tc.arguments;
           if (!start_line || !end_line) throw new Error('start_line and end_line are required');
-          const lines = currentMockupHtml.split('\n');
+          const lines = getHtml().split('\n');
           const start = Math.max(1, Math.min(lines.length, start_line)) - 1;
           const end = Math.max(start, Math.min(lines.length, end_line));
           const before = lines.slice(0, start).join('\n');
           const after = lines.slice(end).join('\n');
-          currentMockupHtml = before + (before && new_content ? '\n' : '') + (new_content || '') + (after && new_content ? '\n' : '') + after;
-          emit({ type: 'html_updated', html: currentMockupHtml, explanation: tc.arguments.explanation || '' });
+          store.set(before + (before && new_content ? '\n' : '') + (new_content || '') + (after && new_content ? '\n' : '') + after);
+          emit({ type: 'html_updated', html: getHtml(), explanation: tc.arguments.explanation || '' });
           result = `Lines ${start_line}-${end_line} replaced. ${tc.arguments.explanation || ''}`;
         } else if (tc.name === 'write_mockup') {
           if (!tc.arguments.html) throw new Error('html is required');
-          currentMockupHtml = tc.arguments.html;
-          emit({ type: 'html_updated', html: currentMockupHtml, explanation: tc.arguments.explanation || '' });
+          store.set(tc.arguments.html);
+          emit({ type: 'html_updated', html: getHtml(), explanation: tc.arguments.explanation || '' });
           result = `Mockup replaced. ${tc.arguments.explanation || ''}`;
+        } else if (tc.name === 'undo_mockup') {
+          const previous = store.undo();
+          if (previous === null) result = 'No previous version to restore. The mockup is unchanged.';
+          else {
+            emit({ type: 'html_updated', html: getHtml(), explanation: 'Restored previous version' });
+            result = 'Restored the mockup to the previous version.';
+          }
+        } else if (tc.name === 'fetch_url') {
+          result = await fetchUrl(tc.arguments.url || '');
+        } else if (tc.name === 'inspect_page') {
+          result = await inspectPage(tc.arguments.url || '');
+        } else if (tc.name === 'list_images') {
+          result = await listImages(tc.arguments.url || '');
+        } else if (tc.name === 'grab_image') {
+          result = await grabImage(tc.arguments.url || '');
+        } else if (tc.name === 'validate_html') {
+          const issues = validateHtml(getHtml());
+          if (issues.length === 0) result = 'No HTML issues found. The mockup is valid.';
+          else {
+            const summary = issues.map(i => `[${i.severity}] ${i.message}`).join('\n');
+            result = `${issues.length} issue(s) found:\n${summary}`;
+          }
+        } else if (tc.name === 'mock_data') {
+          result = generateMockData(tc.arguments.dataset || 'users', tc.arguments.count);
+        } else if (tc.name === 'check_console') {
+          result = formatConsoleLog(consoleLog);
         } else if (mcpClient && mcpClient.tools?.has(tc.name)) {
           result = await mcpClient.callTool(tc.name, tc.arguments);
         } else { result = `Tool ${tc.name} executed`; }
@@ -321,7 +425,7 @@ export async function runAgent({ prompt, thread, mockupHtml, settings, mcpTools,
     } catch (err) {
       console.error('[Agent] Error:', err.message);
       emit({ type: 'error', error: err.message });
-      return { events, finalHtml: currentMockupHtml, error: err.message };
+      return { events, finalHtml: getHtml(), error: err.message };
     }
   }
 }
@@ -426,4 +530,80 @@ async function callMock(messages, settings, onStream) {
       },
     }],
   };
+}
+
+const FETCH_MAX_CHARS = 30000;
+
+export async function fetchUrl(url) {  if (!url) return 'Please provide a URL.';
+  let parsed;
+  try { parsed = new URL(url); } catch { return `Invalid URL: ${url}`; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return `Unsupported protocol "${parsed.protocol}". Only http(s) URLs are supported.`;
+
+  let res;
+  try {
+    res = await fetch(parsed.toString(), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+  } catch (err) {
+    return `Failed to fetch URL: ${err.message}`;
+  }
+  if (!res.ok) return `Request failed with status ${res.status} ${res.statusText}`;
+
+  const contentType = res.headers.get('content-type') || '';
+  let body;
+  try { body = await res.text(); } catch (err) { return `Failed to read response: ${err.message}`; }
+
+  if (contentType.includes('application/json')) {
+    try {
+      const pretty = JSON.stringify(JSON.parse(body), null, 2);
+      return `JSON response (${body.length} bytes):\n${truncate(pretty, FETCH_MAX_CHARS)}`;
+    } catch { return truncate(body, FETCH_MAX_CHARS); }
+  }
+  if (contentType.includes('html') || /<!doctype\s+html|<html[\s>]/i.test(body)) {
+    return htmlToText(body);
+  }
+  return truncate(body, FETCH_MAX_CHARS);
+}
+
+function truncate(text, max) {
+  return text.length > max ? text.slice(0, max) + `\n... [truncated, total ${text.length} chars]` : text;
+}
+
+function htmlToText(html) {
+  const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+
+  let text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n')
+    .trim();
+
+  const links = [];
+  const linkRegex = /<a[^>]+href="([^"]+)"/gi;
+  let m;
+  while ((m = linkRegex.exec(html)) && links.length < 20) links.push(m[1]);
+
+  const parts = [];
+  if (title) parts.push(`TITLE: ${title}`);
+  parts.push(text);
+  if (links.length > 0) parts.push(`LINKS:\n${links.join('\n')}`);
+  return truncate(parts.join('\n\n'), FETCH_MAX_CHARS);
+}
+
+function formatConsoleLog(consoleLog) {
+  const entries = consoleLog || [];
+  if (entries.length === 0) return 'No console messages captured yet.';
+  const lines = entries.map(e => {
+    const loc = e.source ? ` (${e.source}${e.line ? `:${e.line}` : ''})` : '';
+    return `[${e.type}] ${e.message}${loc}`;
+  });
+  return `Console log (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}, oldest first):\n${lines.join('\n')}`;
 }

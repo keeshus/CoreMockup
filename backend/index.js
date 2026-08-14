@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { runAgent, getBuiltinTools } from './agent.js';
 import { MCPManager } from './mcp.js';
+import { createMockupStore } from './mockup-store.js';
 import { initDb, loadSettings, saveSettings, listSessions, getSession, createSession, updateSession, deleteSession } from './db/index.js';
 
 const app = express();
@@ -12,7 +13,8 @@ app.use(express.json({ limit: '10mb' }));
 
 const mcpManager = new MCPManager();
 let settings = {};
-let currentMockupHtml = '';
+const mockupStore = createMockupStore();
+const consoleLog = [];
 
 async function start() {
   const db = await initDb();
@@ -45,7 +47,8 @@ app.post('/api/chat', async (req, res) => {
     const result = await runAgent({
       prompt,
       thread: thread || [],
-      mockupHtml: currentMockupHtml,
+      mockupStore,
+      consoleLog,
       settings,
       mcpTools: mcpToolDefs,
       mcpClient: {
@@ -54,7 +57,7 @@ app.post('/api/chat', async (req, res) => {
       },
       onEvent: (event) => {
         if (event.type === 'html_updated') {
-          currentMockupHtml = event.html;
+          mockupStore.set(event.html);
         }
         res.write(JSON.stringify(event) + '\n');
       },
@@ -65,7 +68,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     if (!result.events.some(e => e.type === 'done')) {
-      res.write(JSON.stringify({ type: 'done', finalHtml: currentMockupHtml }) + '\n');
+      res.write(JSON.stringify({ type: 'done', finalHtml: mockupStore.get() }) + '\n');
     }
   } catch (err) {
     console.error('Chat error:', err);
@@ -185,14 +188,30 @@ app.delete('/api/sessions/:id', async (req, res) => {
   }
 });
 
+app.get('/api/console', (req, res) => {
+  res.json({ entries: consoleLog });
+});
+
+app.post('/api/console', (req, res) => {
+  const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
+  consoleLog.length = 0;
+  for (const e of entries.slice(-50)) {
+    if (e && typeof e.message === 'string') {
+      consoleLog.push({ type: e.type || 'info', message: e.message, source: e.source || '', line: e.line || null });
+    }
+  }
+  res.json({ ok: true, count: consoleLog.length });
+});
+
 app.post('/api/reset', (req, res) => {
-  currentMockupHtml = '';
+  mockupStore.clear();
+  consoleLog.length = 0;
   res.json({ ok: true, message: 'Mockup reset' });
 });
 
 app.put('/api/mockup', (req, res) => {
   const { html } = req.body;
-  currentMockupHtml = html || '';
+  mockupStore.set(html || '');
   res.json({ ok: true });
 });
 

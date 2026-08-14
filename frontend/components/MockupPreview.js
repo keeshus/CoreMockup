@@ -1,18 +1,92 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import html2canvas from 'html2canvas';
 
+const CONSOLE_SOURCE = 'core-mockup-console';
+
+const CONSOLE_CAPTURE_SCRIPT = `<script>
+(function () {
+  function post(type, payload) {
+    try { parent.postMessage({ source: '${CONSOLE_SOURCE}', type: type, payload: payload }, '*'); } catch (e) {}
+  }
+  window.addEventListener('error', function (e) {
+    post('error', { message: e.message || String(e.error), source: e.filename, line: e.lineno, col: e.colno });
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    post('error', { message: 'Unhandled promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)) });
+  });
+  ['error', 'warn', 'info'].forEach(function (level) {
+    var orig = console[level];
+    if (!orig) return;
+    console[level] = function () {
+      var args = Array.prototype.slice.call(arguments);
+      var message = args.map(function (a) {
+        try {
+          if (typeof a === 'string') return a;
+          if (a instanceof Error) return a.message;
+          return JSON.stringify(a);
+        } catch (e) { return String(a); }
+      }).join(' ');
+      post(level, { message: message });
+      orig.apply(console, arguments);
+    };
+  });
+})();
+</script>`;
+
+function injectConsoleCapture(html) {
+  if (html.includes(CONSOLE_SOURCE)) return html;
+  const script = '\n' + CONSOLE_CAPTURE_SCRIPT + '\n';
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, script + '</body>');
+  return html + script;
+}
+
 export default function MockupPreview({ html }) {
   const iframeRef = useRef(null);
   const containerRef = useRef(null);
+  const consoleRef = useRef([]);
+  const debounceRef = useRef(null);
   const [capturing, setCapturing] = useState(false);
 
   useEffect(() => {
     if (!iframeRef.current || !html) return;
-    const blob = new Blob([html], { type: 'text/html' });
+    const wrapped = injectConsoleCapture(html);
+    const blob = new Blob([wrapped], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     iframeRef.current.src = url;
     return () => URL.revokeObjectURL(url);
   }, [html]);
+
+  useEffect(() => {
+    const onMessage = (event) => {
+      const data = event.data;
+      if (!data || data.source !== CONSOLE_SOURCE) return;
+      consoleRef.current.push({
+        type: data.type,
+        message: data.payload?.message || '',
+        source: data.payload?.source || '',
+        line: data.payload?.line || null,
+      });
+      if (consoleRef.current.length > 50) consoleRef.current.shift();
+
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(async () => {
+        try {
+          await fetch('/api/console', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entries: consoleRef.current }),
+          });
+        } catch (err) {
+          console.error('Failed to report console messages:', err);
+        }
+      }, 400);
+    };
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const handleScreenshot = useCallback(async () => {
     if (!html) return;
