@@ -115,7 +115,7 @@ export async function listImages(url) {
     lines.push(`[${i + 1}] ${c.role} — ${c.filename || c.url} (${type}${c.context ? `, ${c.context}` : ''})`);
     lines.push(`    ${c.url}`);
   }
-  lines.push('\nCall grab_image with the URL of an image you want, then put the returned data URI directly in an <img src="..."> tag of the mockup.');
+  lines.push('\nCall grab_image with the URL of an image you want, then put the returned URL directly in an <img src="..."> tag of the mockup.');
   return lines.join('\n');
 }
 
@@ -160,7 +160,7 @@ function sniffImage(bytes, contentType) {
   return { mime: contentType || 'application/octet-stream', width: 0, height: 0 };
 }
 
-export async function grabImage(url, maxBytes = MAX_IMAGE_BYTES) {
+export async function grabImage(url, maxBytes = MAX_IMAGE_BYTES, sessionId = null, imageCache = null) {
   let parsed;
   try { parsed = new URL(url); } catch { return `Invalid URL: ${url}`; }
   if (!['http:', 'https:'].includes(parsed.protocol)) return `Unsupported protocol "${parsed.protocol}". Only http(s) URLs are supported.`;
@@ -188,6 +188,13 @@ export async function grabImage(url, maxBytes = MAX_IMAGE_BYTES) {
   }
 
   const dims = info.width > 0 ? `${info.width}×${info.height}` : 'unknown dimensions';
+
+  if (imageCache) {
+    const id = await imageCache.storeImage(buf, info.mime, sessionId);
+    const url = imageCache.imageUrl(id);
+    return `IMAGE READY (${info.mime}, ${dims}, ${Math.round(buf.length / 1024)} KB). Use this URL as the src of your <img> tag (set width="${info.width || ''}" height="${info.height || ''}" alt="..."):\n${url}`;
+  }
+
   const dataUri = `data:${info.mime};base64,${buf.toString('base64')}`;
   return `IMAGE READY (${info.mime}, ${dims}, ${Math.round(buf.length / 1024)} KB). Use this data URI as the src of your <img> tag (set width="${info.width || ''}" height="${info.height || ''}" alt="..."):\n${dataUri}`;
 }

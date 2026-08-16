@@ -1,5 +1,7 @@
 FROM node:25-alpine AS builder
 WORKDIR /app
+ARG BACKEND_URL=http://localhost:3101
+ENV BACKEND_URL=$BACKEND_URL
 COPY package*.json ./
 COPY frontend/package*.json ./frontend/
 RUN npm install -w frontend

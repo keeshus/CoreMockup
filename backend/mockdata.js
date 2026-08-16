@@ -93,24 +93,34 @@ function generateParagraphs(rng, count) {
   return paragraphs;
 }
 
-function avatarDataUri(name, color) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="${color}"/><text x="32" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#fff" text-anchor="middle">${initials(name)}</text></svg>`;
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+function avatarSvg(name, color) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="${color}"/><text x="32" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#fff" text-anchor="middle">${initials(name)}</text></svg>`;
 }
 
-function generateAvatars(rng, count) {
+function avatarDataUri(name, color) {
+  return `data:image/svg+xml;base64,${Buffer.from(avatarSvg(name, color)).toString('base64')}`;
+}
+
+async function generateAvatars(rng, count, sessionId, imageCache) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const first = pick(rng, FIRST);
     const last = pick(rng, LAST);
     const name = `${first} ${last}`;
     const color = pick(rng, COLORS);
-    out.push({ name, initials: initials(name), color, dataUri: avatarDataUri(name, color) });
+    let src;
+    if (imageCache) {
+      const id = await imageCache.storeImage(Buffer.from(avatarSvg(name, color)), 'image/svg+xml', sessionId);
+      src = imageCache.imageUrl(id);
+    } else {
+      src = avatarDataUri(name, color);
+    }
+    out.push({ name, initials: initials(name), color, src });
   }
   return out;
 }
 
-export function generateMockData(dataset, count = 5) {
+export async function generateMockData(dataset, count = 5, sessionId = null, imageCache = null) {
   const n = Math.max(1, Math.min(MAX_COUNT, Math.floor(count) || 5));
   const rng = mulberry32(Date.now() & 0xffffffff);
 
@@ -119,7 +129,7 @@ export function generateMockData(dataset, count = 5) {
     case 'products': data = generateProducts(rng, n); break;
     case 'chart_series': data = generateChartSeries(rng, n); break;
     case 'paragraphs': data = generateParagraphs(rng, n); break;
-    case 'avatars': data = generateAvatars(rng, n); break;
+    case 'avatars': data = await generateAvatars(rng, n, sessionId, imageCache); break;
     case 'users':
     default: data = generateUsers(rng, n); break;
   }

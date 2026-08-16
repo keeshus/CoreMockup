@@ -3,7 +3,8 @@ import cors from 'cors';
 import { runAgent, getBuiltinTools } from './agent.js';
 import { MCPManager } from './mcp.js';
 import { createMockupStore } from './mockup-store.js';
-import { initDb, loadSettings, saveSettings, listSessions, getSession, createSession, updateSession, deleteSession } from './db/index.js';
+import { initDb, loadSettings, saveSettings, listSessions, getSession, createSession, updateSession, deleteSession, listAllSessionHtmls } from './db/index.js';
+import { initImageCache, getImage, deleteSessionImages, sweepImageCache, storeImage, imageUrl } from './image-cache.js';
 
 const app = express();
 const port = process.env.PORT || 3101;
@@ -19,6 +20,14 @@ const consoleLog = [];
 async function start() {
   const db = await initDb();
   settings = await loadSettings();
+  await initImageCache();
+
+  try {
+    const sessions = await listAllSessionHtmls();
+    await sweepImageCache(sessions.map(s => s.html));
+  } catch (err) {
+    console.error('Image cache sweep error:', err);
+  }
 
   if (settings.mcpServers?.length > 0) {
     mcpManager.connectAll(settings.mcpServers).catch(err => {
@@ -32,7 +41,7 @@ async function start() {
 }
 
 app.post('/api/chat', async (req, res) => {
-  const { prompt, thread } = req.body;
+  const { prompt, thread, sessionId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
   res.setHeader('Content-Type', 'application/x-ndjson');
@@ -54,6 +63,11 @@ app.post('/api/chat', async (req, res) => {
       mcpClient: {
         tools: mcpManager.tools,
         callTool: (name, args) => mcpManager.callTool(name, args),
+      },
+      sessionId: sessionId || null,
+      imageCache: {
+        storeImage,
+        imageUrl,
       },
       onEvent: (event) => {
         if (event.type === 'html_updated') {
@@ -121,6 +135,14 @@ app.post('/api/settings', async (req, res) => {
   res.json(safe);
 });
 
+app.get('/api/images/:id', async (req, res) => {
+  const img = await getImage(req.params.id);
+  if (!img) return res.status(404).json({ error: 'Image not found' });
+  res.setHeader('Content-Type', img.mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(img.buffer);
+});
+
 app.post('/api/screenshot', (req, res) => {
   const { html } = req.body;
   if (!html) return res.status(400).json({ error: 'HTML is required' });
@@ -181,7 +203,10 @@ app.put('/api/sessions/:id', async (req, res) => {
 
 app.delete('/api/sessions/:id', async (req, res) => {
   try {
-    await deleteSession(parseInt(req.params.id));
+    const id = parseInt(req.params.id);
+    await deleteSession(id);
+    const others = await listAllSessionHtmls();
+    await deleteSessionImages(id, others.map(s => s.html));
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

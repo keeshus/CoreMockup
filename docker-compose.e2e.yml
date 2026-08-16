@@ -37,14 +37,16 @@ services:
   backend:
     container_name: core-mockup-backend
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "3101:3101"
     environment:
       - PORT=3101
       - DATABASE_URL=postgres://core_mockup:core_mockup_dev@postgres:5432/core_mockup
       - LLM_PROVIDER=mock
+    volumes:
+      - imagecache:/app/backend/cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,15 +55,19 @@ services:
   frontend:
     container_name: core-mockup-frontend
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        BACKEND_URL: http://backend:3101
     ports:
       - "3102:3000"
     environment:
       - NEXT_TELEMETRY_DISABLED=1
+      - BACKEND_URL=http://backend:3101
     depends_on:
       - backend
     restart: always
 
 volumes:
   pgdata:
+  imagecache:

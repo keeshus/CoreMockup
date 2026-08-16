@@ -78,6 +78,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
+          sessionId: currentSessionIdRef.current,
           thread: thread.map(m => {
             const entry = { role: m.role, content: m.text };
             const tcs = m.toolCalls?.map(tc => ({

@@ -87,7 +87,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'grab_image',
-    description: 'Fetch an image and return it as a base64 data URI that you can paste directly into the mockup as <img src="...">. Use this to embed logos and other images from a reference site. Images above ~300 KB are rejected; pick smaller ones. The data URI keeps the mockup self-contained (preview and screenshot work without the remote site).',
+    description: 'Fetch an image and cache it, returning a short URL (http://localhost:3101/api/images/<id>) that you embed directly in the mockup as <img src="...">. Images are cached on the server per session and cleaned up when the session is deleted, so never convert them to base64 yourself. Use this for logos, photos and icons from a reference site.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -103,7 +103,7 @@ const BUILTIN_TOOLS = [
   },
   {
     name: 'mock_data',
-    description: 'Generate realistic placeholder data to fill mockups: users, products, chart series, paragraphs, or avatar images (as data URIs you can put directly in an <img> tag). Use this so mockups look real instead of showing lorem ipsum everywhere.',
+    description: 'Generate realistic placeholder data to fill mockups: users, products, chart series, paragraphs, or avatar images (returned as short URLs you can put directly in an <img src> tag). Use this so mockups look real instead of showing lorem ipsum everywhere.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -152,11 +152,15 @@ function formatToolsForAnthropic(tools) {
 function extractToolCalls(response, provider) {
   if (provider === 'anthropic') {
     if (!response.content) return [];
-    return response.content.filter(c => c.type === 'tool_use').map(b => ({ id: b.id, name: b.name, arguments: b.input }));
+    return response.content.filter(c => c.type === 'tool_use').map(b => ({ id: b.id, name: b.name, arguments: b.input ?? null }));
   }
   const msg = response.choices[0]?.message;
   if (!msg?.tool_calls) return [];
-  return msg.tool_calls.map(tc => ({ id: tc.id, name: tc.function.name, arguments: JSON.parse(tc.function.arguments) }));
+  return msg.tool_calls.map(tc => {
+    let args = null;
+    try { args = JSON.parse(tc.function.arguments); } catch {}
+    return { id: tc.id, name: tc.function.name, arguments: args };
+  });
 }
 
 async function callOpenAI(messages, tools, settings, onStream) {
@@ -171,14 +175,16 @@ async function callOpenAI(messages, tools, settings, onStream) {
     tools: tools.length > 0 ? formatToolsForOpenAI(tools) : undefined,
     tool_choice: 'auto',
     stream: true,
-    max_tokens: 16384,
   };
+  if (/^(o[1-9]|o3|o4|gpt-5)/i.test(settings.openaiModel)) body.max_completion_tokens = 64000;
+  else body.max_tokens = 64000;
   if (settings.reasoningEffort && ['low', 'medium', 'high'].includes(settings.reasoningEffort)) body.reasoning_effort = settings.reasoningEffort;
   const res = await openai.chat.completions.create(body);
   const fullResponse = { choices: [{ message: { content: '', tool_calls: [] } }] };
   const toolCallMap = {};
   for await (const chunk of res) {
     const delta = chunk.choices?.[0]?.delta;
+    if (chunk.choices?.[0]?.finish_reason === 'length') fullResponse._truncated = true;
     if (!delta) continue;
     if (delta.reasoning_content && onStream) onStream({ type: 'reasoning', text: delta.reasoning_content });
     if (delta.content) {
@@ -250,13 +256,14 @@ async function callAnthropic(messages, tools, settings, onStream) {
     system: systemMsg?.content || 'You are a UI expert.',
     messages: userMessages,
     tools: tools.length > 0 ? formatToolsForAnthropic(tools) : undefined,
-    max_tokens: 16384,
+    max_tokens: 64000,
     stream: true,
   };
   if (settings.thinkingBudget && parseInt(settings.thinkingBudget) > 0) body.thinking = { type: 'enabled', budget_tokens: parseInt(settings.thinkingBudget) };
   const res = await anthropic.messages.create(body);
   const content = [];
   for await (const event of res) {
+    if (event.type === 'message_delta' && event.delta?.stop_reason === 'max_tokens') content._truncated = true;
     if (event.type === 'content_block_start' && event.content_block?.type === 'text' && onStream) onStream({ type: 'text_chunk', text: event.content_block.text });
     if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && onStream) onStream({ type: 'text_chunk', text: event.delta.text });
     if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta' && onStream) onStream({ type: 'reasoning', text: event.delta.thinking });
@@ -271,15 +278,19 @@ async function callAnthropic(messages, tools, settings, onStream) {
       if (event.delta?.type === 'input_json_delta') currentBlock._inputDelta = (currentBlock._inputDelta || '') + event.delta.partial_json;
     }
     if (event.type === 'content_block_stop' && currentBlock) {
-      if (currentBlock.type === 'tool_use' && currentBlock._inputDelta) { try { currentBlock.input = JSON.parse(currentBlock._inputDelta); } catch {} }
+      if (currentBlock.type === 'tool_use' && currentBlock._inputDelta) {
+        try { currentBlock.input = JSON.parse(currentBlock._inputDelta); }
+        catch { currentBlock.input = content._truncated ? null : {}; }
+      }
       result.content.push(currentBlock);
       currentBlock = null;
     }
   }
+  if (content._truncated) result._truncated = true;
   return result;
 }
 
-export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consoleLog, settings, mcpTools, mcpClient, onEvent }) {
+export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consoleLog, settings, mcpTools, mcpClient, onEvent, sessionId = null, imageCache = null }) {
   const events = [];
   const emit = (event) => { events.push(event); if (onEvent) onEvent(event); };
 
@@ -315,8 +326,17 @@ export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consol
 
   for (let round = 0; ; round++) {
     const toolCalls = extractToolCalls(response, provider);
+    const truncatedCall = toolCalls.find(tc => tc.arguments === null);
     const respondCall = toolCalls.find(tc => tc.name === 'respond');
     const otherCalls = toolCalls.filter(tc => tc.name !== 'respond');
+
+    if (truncatedCall) {
+      const msg = `The model's response was cut off mid-call (tool: ${truncatedCall.name}, token limit reached). The mockup is unchanged — try again, or ask for a smaller mockup.`;
+      console.error('[Agent] Truncated response:', msg);
+      emit({ type: 'error', error: msg });
+      emit({ type: 'done', finalHtml: getHtml() });
+      return { events, finalHtml: getHtml(), error: msg };
+    }
 
     if (respondCall) {
       emit({ type: 'text', text: respondCall.arguments.message || '' });
@@ -399,7 +419,7 @@ export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consol
         } else if (tc.name === 'list_images') {
           result = await listImages(tc.arguments.url || '');
         } else if (tc.name === 'grab_image') {
-          result = await grabImage(tc.arguments.url || '');
+          result = await grabImage(tc.arguments.url || '', undefined, sessionId, imageCache);
         } else if (tc.name === 'validate_html') {
           const issues = validateHtml(getHtml());
           if (issues.length === 0) result = 'No HTML issues found. The mockup is valid.';
@@ -408,7 +428,7 @@ export async function runAgent({ prompt, thread, mockupHtml, mockupStore, consol
             result = `${issues.length} issue(s) found:\n${summary}`;
           }
         } else if (tc.name === 'mock_data') {
-          result = generateMockData(tc.arguments.dataset || 'users', tc.arguments.count);
+          result = await generateMockData(tc.arguments.dataset || 'users', tc.arguments.count, sessionId, imageCache);
         } else if (tc.name === 'check_console') {
           result = formatConsoleLog(consoleLog);
         } else if (mcpClient && mcpClient.tools?.has(tc.name)) {
